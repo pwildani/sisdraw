@@ -1,0 +1,8 @@
+[package]
+name = "sis_draw"
+version = "0.1.0"
+authors = ["Peter Wildani <pabw00@gmail.com>"]
+
+[dependencies]
+image = "*"
+imageproc = "*"
