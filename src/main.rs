@@ -2,10 +2,12 @@ extern crate csv;
 extern crate image;
 extern crate imageproc;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
+#[macro_use] extern crate serde_derive;
 
+use std::cmp::max;
 use std::env;
+use std::error::Error;
+use std::ffi::OsString;
 use std::fs::File;
 use std::process;
 
@@ -91,7 +93,7 @@ impl ArcToXYIter {
     pub fn new(dims: (u32, u32), start: TR, end: TR) -> ArcToXYIter {
         let (w, h) = dims;
         let m = (w + h) as f64 / 2.0;
-        let steps = (dist(start, end) * (m as f64)) as u32 / 10;
+        let steps = max(1, (dist(start, end) * (m as f64)) as u32 / 10);
         ArcToXYIter {
             start: start,
             end: end,
@@ -106,6 +108,10 @@ impl ArcToXYIter {
 
     fn peek(&self) -> XY {
         self.start.interp_to(self.end, self.s + self.incr).xy()
+    }
+
+    fn default_incr(&self) -> f64 {
+        1.0 / self.steps as f64
     }
 }
 
@@ -131,20 +137,26 @@ impl Iterator for ArcToXYIter {
         // having too many (or too few!) pixels.
         if s != 1.0 {
             while dist(self.last, next) * m > 8.0 {
-                self.incr /= 2.0;
+                self.incr *= 7.9 / (dist(self.last, next) * m);
+                //println!("Adj too far: incr -> {}, dist={}", self.incr, dist(self.last, next)*m);
                 next = self.peek();
-                //println!("Adj: incr -> {}, dist={}", self.incr, dist(self.last, next)*m);
             }
             while dist(self.last, next) * m < 3.0 {
-                self.incr *= 2.0;
+                self.incr *= 3.1 / (dist(self.last, next) * m);
+                //println!("Adj too short: incr -> {}, dist={}", self.incr, dist(self.last, next)*m);
                 next = self.peek();
-                //println!("Adj: incr -> {}, dist={}", self.incr, dist(self.last, next)*m);
             }
             if self.incr <= 0.0 {
-                panic!("Bad incr!");
+                println!("Bad incr!");
+                self.incr = self.default_incr();
             }
             if self.incr == std::f64::INFINITY {
-                self.incr = 100000.0;
+                println!(
+                    "Infinite incr, reset to {}, steps={}",
+                    self.default_incr(),
+                    self.steps
+                );
+                self.incr = self.default_incr();
                 next = self.peek();
             }
             if self.last == next {
@@ -168,38 +180,135 @@ impl Iterator for ArcToXYIter {
     }
 }
 
-fn draw_arc<I, B>(img: &mut I, start: TR, end: TR, color: I::Pixel, blend: B)
-where
+fn draw_fat_arc<I, B>(
+    img: &mut I,
+    start: TR,
+    end: TR,
+    bgcolor: I::Pixel,
+    centercolor: I::Pixel,
+    blend: B,
+) where
     I: GenericImage,
     I::Pixel: 'static,
     B: Fn(I::Pixel, I::Pixel, f32) -> I::Pixel,
 {
     for (s1, s2) in ArcToXYIter::new(img.dimensions(), start, end) {
-        println!("Draw {:?} -> {:?}", s1, s2);
-        draw_antialiased_line_segment_mut(img, s1, s2, color, &blend);
+        // println!("Draw {:?} -> {:?}", s1, s2);
+        let (x1, y1) = s1;
+        let (x2, y2) = s2;
+        let slope = (x2 - x1) as f32 / (y2 - y1) as f32;
+
+        if -1.0 <= slope && slope < 1.0 {
+            draw_antialiased_line_segment_mut(img, (x1 - 3, y1), (x2 - 3, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 3, y1), (x2 + 3, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 - 2, y1), (x2 - 2, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 2, y1), (x2 + 2, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 - 1, y1), (x2 - 1, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 1, y1), (x2 + 1, y2), bgcolor, &blend);
+
+            draw_antialiased_line_segment_mut(img, (x1 - 1, y1), (x2 - 1, y2), centercolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 1, y1), (x2 + 1, y2), centercolor, &blend);
+        }
+
+        if slope < -1.0 || 1.0 < slope {
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 3), (x2, y2 + 3), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 3), (x2, y2 - 3), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 2), (x2, y2 + 2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 2), (x2, y2 - 2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 1), (x2, y2 + 1), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 1), (x2, y2 - 1), bgcolor, &blend);
+
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 1), (x2, y2 + 1), centercolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 1), (x2, y2 - 1), centercolor, &blend);
+        }
+
+        if slope == 1.0 {
+            draw_antialiased_line_segment_mut(img, (x1 - 3, y1), (x2 - 3, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 3, y1), (x2 + 3, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 - 2, y1), (x2 - 2, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 2, y1), (x2 + 2, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 - 1, y1), (x2 - 1, y2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 1, y1), (x2 + 1, y2), bgcolor, &blend);
+
+            draw_antialiased_line_segment_mut(img, (x1 - 1, y1), (x2 - 1, y2), centercolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1 + 1, y1), (x2 + 1, y2), centercolor, &blend);
+        }
+        if slope == -1.0 {
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 1), (x2, y2 + 1), centercolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 1), (x2, y2 - 1), centercolor, &blend);
+        }
+
+        draw_antialiased_line_segment_mut(img, s1, s2, centercolor, &blend);
+        draw_antialiased_line_segment_mut(img, s1, s2, centercolor, &blend);
     }
 }
 
-fn run() -> Result<(), Box<std::error::Error>> {
-    println!("Hello, world!");
-    let args: Vec<String> = env::args().collect();
-    let mut img = GrayImage::from_pixel(2000, 2000, Luma([255u8]));
-    let f = File::open(args[1].clone()).expect("file not found");
-    let mut rdr = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .delimiter(b' ')
-        .from_reader(f);
-    let mut iter = rdr.deserialize();
-    let first: TR = iter.next().ok_or("missing first record").unwrap().unwrap();
-    let mut last: TR = iter.next().ok_or("missing second record").unwrap().unwrap();
-    for rec in iter {
-        let point: TR = rec?;
-        println!("TR {:?} -> {:?}", last, point);
-        draw_arc(&mut img, last, point, Luma([128u8]), interpolate);
-        last = point;
+struct TRFile {
+    src: csv::Reader<File>,
+}
+
+impl TRFile {
+    pub fn reader(file: File) -> csv::Reader<File> {
+        csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(b' ')
+            .from_reader(file)
+    }
+    pub fn open(file: File) -> TRFile {
+        TRFile {
+            src: Self::reader(file),
+        }
     }
 
+    pub fn iter<'a>(&'a mut self) -> impl Iterator<Item = Result<TR, csv::Error>> + 'a {
+        self.src.deserialize()
+    }
+}
+
+type GreyBuffer = image::ImageBuffer<image::Luma<u8>, std::vec::Vec<u8>>;
+
+fn spiral_erase(img: &mut GreyBuffer) {
+    // Basic erase pattern.
+    draw_fat_arc(
+        img,
+        TR { t: 0.0, r: 0.0 },
+        TR {
+            t: 100.0 * 6.28318,
+            r: 1.0,
+        },
+        Luma([255u8]),
+        Luma([128u8]),
+        interpolate,
+    );
+}
+
+fn render_trf(name: String, img: &mut GreyBuffer) -> Result<u32, Box<Error>> {
+    println!("Opening {}", name);
+    let f = File::open(name)?;
+    let mut trf = TRFile::open(f);
+    let mut iter = trf.iter();
+    let mut last: TR = iter.next().ok_or("missing first record")??;
+    let mut count = 0;
+
+    // Draw the thing.
+    for rec in iter {
+        let point: TR = rec?;
+        // println!("{:?} -> {:?}", last, point);
+        draw_fat_arc(img, last, point, Luma([255u8]), Luma([128u8]), interpolate);
+        last = point;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn run() -> Result<(), Box<Error>> {
+    println!("Hello, world!");
+    let args: Vec<String> = env::args().collect();
+    let mut img: GreyBuffer = GrayImage::from_pixel(1000, 1000, Luma([180u8]));
+    spiral_erase(&mut img);
+    let arc_count = render_trf(args[1].clone(), &mut img)?;
     img.save("out.png")?;
+    println!("Rendered {} arcs to out.png", arc_count);
     Ok(())
 }
 
