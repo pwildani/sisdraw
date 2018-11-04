@@ -4,5 +4,8 @@ version = "0.1.0"
 authors = ["Peter Wildani <pabw00@gmail.com>"]
 
 [dependencies]
+csv = "*"
+serde = "*"
+serde_derive = "*"
 image = "*"
 imageproc = "*"
