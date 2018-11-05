@@ -2,12 +2,12 @@ extern crate csv;
 extern crate image;
 extern crate imageproc;
 extern crate serde;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 use std::cmp::max;
 use std::env;
 use std::error::Error;
-use std::ffi::OsString;
 use std::fs::File;
 use std::process;
 
@@ -234,6 +234,13 @@ fn draw_fat_arc<I, B>(
             draw_antialiased_line_segment_mut(img, (x1 + 1, y1), (x2 + 1, y2), centercolor, &blend);
         }
         if slope == -1.0 {
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 3), (x2, y2 - 3), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 3), (x2, y2 + 3), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 2), (x2, y2 - 2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 2), (x2, y2 + 2), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 - 1), (x2, y2 - 1), bgcolor, &blend);
+            draw_antialiased_line_segment_mut(img, (x1, y1 + 1), (x2, y2 + 1), bgcolor, &blend);
+
             draw_antialiased_line_segment_mut(img, (x1, y1 + 1), (x2, y2 + 1), centercolor, &blend);
             draw_antialiased_line_segment_mut(img, (x1, y1 - 1), (x2, y2 - 1), centercolor, &blend);
         }
