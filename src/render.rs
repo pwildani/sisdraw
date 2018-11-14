@@ -2,6 +2,7 @@ use std::mem::swap;
 
 use image::*;
 //use imageproc::drawing::draw_antialiased_line_segment_mut;
+use imageproc::drawing::draw_filled_circle_mut;
 
 use arc::ArcToXYIter;
 use tr::TR;
@@ -78,6 +79,14 @@ pub fn draw_fat_arc<I, B>(
     I::Pixel: 'static,
     B: Fn(I::Pixel, I::Pixel, f32) -> I::Pixel,
 {
+    // Draw displacement circles at end to approximate actually joining the
+    // arc segments.
+    let endxy = end.xy().on(img.dimensions());
+    let endc = (endxy.0 as i32, endxy.1 as i32);
+    draw_filled_circle_mut(img, endc, 3, bgcolor);
+    draw_filled_circle_mut(img, endc, 2, centercolor);
+
+    // Then draw the path to the end on top, (after, to break the circle above)
     for (s1, s2) in ArcToXYIter::new(img.dimensions(), start, end) {
         // println!("Draw {:?} -> {:?}", s1, s2);
         let bgc = |_| bgcolor;
