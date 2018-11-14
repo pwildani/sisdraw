@@ -6,6 +6,66 @@ use image::*;
 use arc::ArcToXYIter;
 use tr::TR;
 
+#[derive(Debug, Clone)]
+struct Point(pub f32, pub f32);
+
+impl Point {
+    fn plus(&self, delta: (f32, f32)) -> (f32, f32) {
+        (self.0 + delta.0, self.1 + delta.1)
+    }
+
+    fn times(&self, scalar: f32) -> (f32, f32) {
+        (self.0 * scalar, self.1 * scalar)
+    }
+}
+
+impl From<(f32, f32)> for Point {
+    fn from(a: (f32, f32)) -> Point {
+        Point(a.0, a.1)
+    }
+}
+impl Into<(f32, f32)> for Point {
+    fn into(self) -> (f32, f32) {
+        (self.0, self.1)
+    }
+}
+
+fn draw_wide<I, P, B, C>(halfwidth: i32, img: &mut I, start: P, end: P, color: C, blend: B)
+where
+    I: GenericImage,
+    I::Pixel: 'static,
+    P: Into<Point>,
+    B: Fn(I::Pixel, I::Pixel, f32) -> I::Pixel,
+    C: Fn(f32) -> I::Pixel,
+{
+    let s1 = start.into();
+    let s2 = end.into();
+    let (x1, y1) = s1.clone().into();
+    let (x2, y2) = s2.clone().into();
+    let delta: Point;
+    if y1 == y2 {
+        delta = Point(0.0, 1.0);
+    } else if x1 == x2 {
+        delta = Point(1.0, 0.0);
+    } else {
+        // One unit step perpendicular to the line.
+        let slope = (x2 - x1) as f32 / (y2 - y1) as f32;
+        let invlen = (slope * slope + 1.0).sqrt().recip();
+        // Normalize [slope, 1] to unit length.
+        let dx = slope * invlen;
+        let dy = 1.0 * invlen;
+        // Rotate 90 degrees. (== [[dx, dy]] * [[cos(90), -sin(90)][sin(90), cos(90)]])
+        let rx = dy;
+        let ry = -dx;
+        delta = Point(rx, ry);
+    }
+    for i in -halfwidth..=halfwidth {
+        let d = delta.times(i as f32);
+        //println!("Delta: {:?} * i: {:?} -> d {:?}", delta, i, d);
+        draw_gradient_antialiased_line_segment_mut(img, s1.plus(d), s2.plus(d), &color, &blend);
+    }
+}
+
 pub fn draw_fat_arc<I, B>(
     img: &mut I,
     start: TR,
@@ -20,252 +80,11 @@ pub fn draw_fat_arc<I, B>(
 {
     for (s1, s2) in ArcToXYIter::new(img.dimensions(), start, end) {
         // println!("Draw {:?} -> {:?}", s1, s2);
-        let (x1, y1) = s1;
-        let (x2, y2) = s2;
-        let slope = (x2 - x1) as f32 / (y2 - y1) as f32;
         let bgc = |_| bgcolor;
+        draw_wide(3, img, s1, s2, bgc, &blend);
+
         let cc = |_| centercolor;
-
-        if -1.0 <= slope && slope < 1.0 {
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 3.0, y1),
-                (x2 - 3.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 3.0, y1),
-                (x2 + 3.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 2.0, y1),
-                (x2 - 2.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 2.0, y1),
-                (x2 + 2.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 1.0, y1),
-                (x2 - 1.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 1.0, y1),
-                (x2 + 1.0, y2),
-                bgc,
-                &blend,
-            );
-
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 1.0, y1),
-                (x2 - 1.0, y2),
-                cc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 1.0, y1),
-                (x2 + 1.0, y2),
-                cc,
-                &blend,
-            );
-        }
-
-        if slope < -1.0 || 1.0 < slope {
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 3.0),
-                (x2, y2 + 3.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 3.0),
-                (x2, y2 - 3.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 2.0),
-                (x2, y2 + 2.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 2.0),
-                (x2, y2 - 2.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 1.0),
-                (x2, y2 + 1.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 1.0),
-                (x2, y2 - 1.0),
-                bgc,
-                &blend,
-            );
-
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 1.0),
-                (x2, y2 + 1.0),
-                cc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 1.0),
-                (x2, y2 - 1.0),
-                cc,
-                &blend,
-            );
-        }
-
-        if slope == 1.0 {
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 3.0, y1),
-                (x2 - 3.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 3.0, y1),
-                (x2 + 3.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 2.0, y1),
-                (x2 - 2.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 2.0, y1),
-                (x2 + 2.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 1.0, y1),
-                (x2 - 1.0, y2),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 1.0, y1),
-                (x2 + 1.0, y2),
-                bgc,
-                &blend,
-            );
-
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 - 1.0, y1),
-                (x2 - 1.0, y2),
-                cc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1 + 1.0, y1),
-                (x2 + 1.0, y2),
-                cc,
-                &blend,
-            );
-        }
-        if slope == -1.0 {
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 3.0),
-                (x2, y2 - 3.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 3.0),
-                (x2, y2 + 3.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 2.0),
-                (x2, y2 - 2.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 2.0),
-                (x2, y2 + 2.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 1.0),
-                (x2, y2 - 1.0),
-                bgc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 1.0),
-                (x2, y2 + 1.0),
-                bgc,
-                &blend,
-            );
-
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 + 1.0),
-                (x2, y2 + 1.0),
-                cc,
-                &blend,
-            );
-            draw_gradient_antialiased_line_segment_mut(
-                img,
-                (x1, y1 - 1.0),
-                (x2, y2 - 1.0),
-                cc,
-                &blend,
-            );
-        }
-
-        draw_gradient_antialiased_line_segment_mut(img, s1, s2, cc, &blend);
+        draw_wide(1, img, s1, s2, cc, &blend);
         draw_gradient_antialiased_line_segment_mut(img, s1, s2, cc, &blend);
     }
 }
