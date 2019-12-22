@@ -1,7 +1,9 @@
-import operator
-import numpy as np
 import math
+import operator
 import random
+import sys
+
+import numpy as np
 
 # Wikipedia: 34 degrees
 ANGLE_OF_REPOSE_SAND = 34.0 / math.pi / 2 * 360.0
@@ -49,6 +51,14 @@ def centerdistpush(shape):
 
     # Direction to push overflow grains at this location. (Because the ball is
     # a sphere)
+    dx2 = np.fromfunction(np.vectorize(lambda i0, i1: pushdir((c0, c1), (i0, i1))[0]), shape, dtype=np.int).astype(np.int)
+    dy2 = np.fromfunction(np.vectorize(lambda i0, i1: pushdir((c0, c1), (i0, i1))[1]), shape, dtype=np.int).astype(np.int)
+    dx, dy = pushdir_array(shape, (c0, c1))
+    return dist, dx, dy, dx2, dy2
+
+def pushdir_array(shape, pos):
+    c0 = pos[0]
+    c1 = pos[1]
     x = np.fromfunction(lambda i0, i1: i0-c0, shape).astype(np.float)
     y = np.fromfunction(lambda i0, i1: i1-c1, shape).astype(np.float)
     r = x / y
@@ -59,7 +69,22 @@ def centerdistpush(shape):
     y[ar > a] = 0
     dx = np.sign(x).astype(np.int)
     dy = np.sign(y).astype(np.int)
-    return dist, dx, dy
+    return dx, dy
+
+
+def pushdir(pos, i):
+    x = i[0] - pos[0]
+    y = i[1] - pos[1]
+    if y == 0:
+        r = x
+    else:
+        r = x / y
+    ar = abs(r)
+    if ar < 0.5:
+        x = 0
+    if ar > 2.0:
+        y = 0
+    return (int(np.sign(x)), int(np.sign(y)))
 
 LAND = ".123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWYZ"
 LAND = LAND + LAND[1:]
@@ -67,11 +92,14 @@ LAND = LAND + LAND[1:]
 LAND = LAND + LAND[1:]
 r = 12
 level = 6
-def render(field, glyphmap=LAND):
+def render(field, glyphmap=LAND, overflow='*'):
     def toglyph():
         for x in range (0, field.shape[0]):
             for y in range (0, field.shape[1]):
-                yield glyphmap[field[x][y]]
+                if field[x][y] < len(glyphmap):
+                    yield glyphmap[field[x][y]]
+                else:
+                    yield overflow
             yield '\n'
     return ''.join(toglyph())
 
@@ -147,8 +175,8 @@ land = mkarena(100, level)
 
 # Precompute stuff for this ball shape
 ball, bmask = mkball(r, level=level)
-dist, pushx, pushy = centerdistpush(ball.shape)
-prender(dist, pushx, pushy)
+dist, pushx, pushy , px2, py2 = centerdistpush(ball.shape)
+prender(dist, pushx, pushy, px2, py2)
 
 # Initial ball drop in the center. Just delete the extra sand.
 pos = (land.shape[0]//2, land.shape[1]//2)
@@ -163,7 +191,7 @@ prender(land)
 for delta in path:
     pos2 = tadd(pos, delta)
     c, b = find_corners(pos2, ball.shape, land.shape)
-    print(pos, c, b)
+    #print(pos, c, b)
     local = slice(land, c)
     lball = ball
     lmask = bmask
@@ -184,30 +212,41 @@ for delta in path:
         cc = (local.shape[0]//2, local.shape[1]//2)
         indicies = list(zip(*ix))
         indicies.sort(key=lambda i: dist[i], reverse=True)
-        print(indicies, ix)
+        #print(indicies, ix)
         ix2 = tuple(map(lambda *a: tuple(a), *indicies))
         last = np.count_nonzero(disturbance[ix])
-        print(last)
+        #print(last)
 
-        def push(pos, land, local, i, grains, needs_settling):
+        def push(pos, poslocal, land, local, i, grains, needs_settling, mult=0):
+            """
+            pos: offset vector of local in land space
+            land: global space
+            local: local space
+            i: cell to push grains off of in local space
+            poslocal: pos in local space
+            grains: number o grains to push
+            needs_settling: output list of new locations that need slope checking.
+            """
+            print(local.shape, poslocal)
+            pushdelta = pushdir_array(local.shape, poslocal)
+            #prender(pushdelta[0], pushdelta[1])
             for _ in range(grains):
                 offset = 0, 0
                 while offset == (0, 0):
                     rx = 1 - (random.random() < CRITICAL_SLOPE)
                     ry = 1 - (random.random() < CRITICAL_SLOPE)
-                    offset = pushx[i] * rx, pushy[i] * ry
-                last_to = None
+                    offset = (
+                            int(random.triangular(0, mult, 1) + 1) * pushdelta[0][i] * rx,
+                            int(random.triangular(0, mult, 1) + 1) * pushdelta[1][i] * ry
+                            )
+                    #print(i, offset, pushdelta[0][i], pushdelta[1][i], [rx, ry])
                 to = tadd(pos, i, offset, limit=land.shape) 
-                j = 1
-                baseoffset = offset
-                while to != last_to and ((land[to]+1+1) / (local[i]-1+1)) < CRITICAL_SLOPE:
-                    j += 1
-                    offset = (baseoffset[0] * j, baseoffset[1] * j)
-                    last_to = to
-                    to = tadd(pos, i, offset, limit=land.shape) 
+
                 # building a pile. Mark it for avalanche checking later
-                if not needs_settling or needs_settling[-1] != tsub(to, pos, limit=local.shape):
-                    needs_settling.append(tsub(to, pos,limit=local.shape))
+                if (land[to] - local[i]) > 1 and (not needs_settling or needs_settling[-1] != to):
+                    if to[0] == 99:
+                        print("corner!", i, to, local.shape, land.shape, land[to])
+                    needs_settling.append(to)
                 local[i] -= 1
                 #print(i, "+", offset, "->",to, local.shape)
                 land[to] += 1
@@ -216,22 +255,26 @@ for delta in path:
         needs_settling = []
         for i in indicies:
             grains = disturbance[i]
-            push(c[0], land, local, i, grains, needs_settling)
+            push(c[0], (c[0][0] - i[0], c[0][1] - i[1]), land, local, i, grains, needs_settling)
 
         # TODO actually settle sand to below angle of repose rather than randomly getting it close
         needs_settling.reverse()
         k = 0
-        while needs_settling:
+        last_needs_settling = []
+        while needs_settling and set(last_needs_settling) != set(needs_settling):
             k += 1
-            print('settling round', k, needs_settling)
+            #print('settling round', k, needs_settling)
             peaks = needs_settling
             needs_settling = []
             for i in peaks:
-                to = tadd(c[0], i, (pushx[i], pushy[i]), limit=local.shape)
+                pushdelta = pushdir(pos2, i)
+                to = tadd(i, pushdelta, limit=land.shape)
                 d = dist2d(i, to)
-                if abs(local[i] - land[to]) != 1 and (local[i] - land[to]) / d > CRITICAL_SLOPE:
-                    grains = max(0, int(local[i] - local[to] - CRITICAL_SLOPE * d))
-                    push(c[0], land, local, i, grains, needs_settling)
+                #print ("settle", i, "->", to, ":", land[i], land[to])
+                if abs(land[i] - land[to]) != 1 and (land[i] - land[to]) / d > CRITICAL_SLOPE:
+                    grains = max(0, int(land[i] - land[to] - CRITICAL_SLOPE * d))
+                    for k in range(grains):
+                        push((0, 0), pos2, land, land, i, 1, needs_settling, mult=k*CRITICAL_SLOPE*CRITICAL_SLOPE)
 
 
 
